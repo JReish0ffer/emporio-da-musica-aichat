@@ -65,7 +65,9 @@ SCHEMAS = [
         "Register a hand-off to a human (complaint, cancellation/refund request, anything you cannot resolve). "
         "Customer is promised an answer within 24 business hours.",
         {"reason": _S, "summary": {**_S, "description": "Self-contained summary for the human attendant"},
-         "contact": {**_S, "description": "Customer name/phone/e-mail if given"}}, ["reason", "summary"]),
+         "contact": {**_S, "description": "Customer name/phone/e-mail if given"},
+         "ticket_id": {**_S, "description": "Existing ticket id (e.g. EM-00001) to add information instead of opening a new one"}},
+        ["reason", "summary"]),
 ]
 
 _IMPL: dict[str, Callable[..., Any]] = {

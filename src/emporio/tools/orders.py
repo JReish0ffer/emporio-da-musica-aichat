@@ -110,7 +110,8 @@ def evaluate_return(ctx: Ctx, order_id: int, reason: str) -> dict:
         label = "§4.1 right of regret" if reason == "regret" else "§4.3 exchange for preference"
         res = {**base, "eligible": ok, "rule": label, "deadline_days": 7, "ineligible_items_check": caveat,
                "logistics_note": "The manual does not describe pickup/label/drop-off details and gives no return address. "
-                                 "Do NOT invent any: say the team will arrange it and offer open_ticket."}
+                                 "Do NOT invent any (no 'coleta'/pickup, no label, no address): say the team will contact "
+                                 "the customer about the details and offer open_ticket."}
         if ok and reason == "regret":
             res["how_it_works"] = ("Item must be in original packaging, unused, with all accessories and manuals. "
                                    "Refund to the original payment method within 10 business days. "
@@ -139,8 +140,27 @@ def evaluate_return(ctx: Ctx, order_id: int, reason: str) -> dict:
 
 
 # ---------------------------------------------------------------- hand-off (Manual §7.3)
-def open_ticket(ctx: Ctx, reason: str, summary: str, contact: str | None = None) -> dict:
-    cur = ctx.conn.execute(
+def open_ticket(ctx: Ctx, reason: str, summary: str, contact: str | None = None,
+                ticket_id: str | None = None) -> dict:
+    """Create a hand-off ticket, or add info (contact, details) to the one already open in this session.
+
+    Design choice: ONE open ticket per conversation. Extra details (phone number, a second message about the same
+    complaint) are appended instead of spawning duplicates, which the LLM tends to do.
+    """
+    row = None
+    if ticket_id:
+        num = int(re.sub(r"\D", "", ticket_id) or 0)
+        row = ctx.conn.execute("SELECT * FROM tickets WHERE ticket_id=? AND session_id=?", (num, ctx.session_id)).fetchone()
+    if row is None:
+        row = ctx.conn.execute("SELECT * FROM tickets WHERE session_id=? AND status='open' ORDER BY ticket_id DESC LIMIT 1",
+                               (ctx.session_id,)).fetchone()
+    if row:
+        ctx.conn.execute("UPDATE tickets SET summary=?, contact=COALESCE(?, contact) WHERE ticket_id=?",
+                         (f"{row['summary']} | UPDATE: {summary}", contact, row["ticket_id"]))
+        ctx.conn.commit()
+        return {"ticket_id": f"EM-{row['ticket_id']:05d}", "status": "updated (same ticket, information added)",
+                "promise": "A team member will get back to the customer within 24 business hours."}
+    cur =ctx.conn.execute(
         "INSERT INTO tickets (session_id, reason, summary, contact, created_at) VALUES (?,?,?,?,?)",
         (ctx.session_id, reason, summary, contact, ctx.now.isoformat(timespec="seconds")))
     ctx.conn.commit()

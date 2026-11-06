@@ -174,3 +174,17 @@ def test_policy_offtopic_returns_nothing():
 def test_verify_rejects_blank_input(ctx):
     assert orders.verify_customer(ctx, 0, "")["verified"] is False
     assert orders.verify_customer(ctx, 7, "  ")["verified"] is False
+
+
+def test_ticket_update_reuses_id(ctx):
+    t = orders.open_ticket(ctx, "late", "Order 8 late")
+    u = orders.open_ticket(ctx, "late", "phone given", contact="(67) 99999-0000", ticket_id=t["ticket_id"])
+    assert u["ticket_id"] == t["ticket_id"] and u["status"].startswith("updated")
+    assert ctx.conn.execute("SELECT COUNT(*) FROM tickets").fetchone()[0] == 1
+
+
+def test_second_ticket_in_same_session_is_merged(ctx):
+    a = orders.open_ticket(ctx, "late", "Order 8 late")
+    b = orders.open_ticket(ctx, "late again", "phone (67) 99999", contact="(67) 99999")
+    assert a["ticket_id"] == b["ticket_id"]
+    assert ctx.conn.execute("SELECT COUNT(*) FROM tickets").fetchone()[0] == 1

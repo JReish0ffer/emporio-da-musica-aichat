@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from typing import Callable
 
@@ -45,6 +46,14 @@ class Agent:
                 time.sleep(1)
         raise RuntimeError(f"LLM unavailable: {last}")
 
+    def _ungrounded_tickets(self, reply: str) -> list[str]:
+        """Ticket numbers (EM-00001) mentioned in the reply that were never created in this session."""
+        mentioned = set(re.findall(r"EM[-‐-―]?\s?(\d{3,6})", reply))
+        if not mentioned:
+            return []
+        real = {r[0] for r in self.conn.execute("SELECT ticket_id FROM tickets WHERE session_id=?", (self.ctx.session_id,))}
+        return [f"EM-{m}" for m in mentioned if int(m) not in real]
+
     def chat(self, user_text: str, on_tool: Callable[[str, dict, str], None] | None = None) -> str:
         """Send one customer message, return the attendant's reply. `on_tool(name, args, result)` for tracing."""
         self.ctx.now = config.now()
@@ -54,11 +63,23 @@ class Agent:
         self.memory.add(sid, "user", user_text, self.ctx.now)
 
         reply = FALLBACK
+        guard_used = False
         try:
             for _ in range(config.MAX_TOOL_ROUNDS):
                 msg = self._complete(messages).choices[0].message
                 if not msg.tool_calls:
                     reply = (msg.content or "").strip() or FALLBACK
+                    bad = self._ungrounded_tickets(reply)
+                    if bad and not guard_used:  # grounding guard: the model invented a ticket number
+                        guard_used = True
+                        messages += [{"role": "assistant", "content": reply},
+                                     {"role": "system", "content": (
+                                         f"GUARD: your draft cites ticket number(s) {', '.join(bad)} that do not exist. "
+                                         "If a ticket is needed, call open_ticket and quote the number it returns; "
+                                         "otherwise rewrite the reply without any ticket number or claim of having opened one.")}]
+                        continue
+                    if bad:
+                        reply = FALLBACK
                     break
                 messages.append({
                     "role": "assistant", "content": msg.content or "",
