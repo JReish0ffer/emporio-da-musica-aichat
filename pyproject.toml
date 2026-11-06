@@ -1,8 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "emporio-da-musica"
 version = "0.1.0"
 description = "Customer-service agent prototype for a fictional musical-instrument store"
 requires-python = ">=3.11"
+dependencies = ["groq>=0.13", "python-dotenv>=1.0", "pypdf>=5.0", "rank-bm25>=0.2.2", "rapidfuzz>=3.9", "rich>=13.7", "tzdata"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+emporio = "emporio.interfaces.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

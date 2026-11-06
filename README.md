@@ -16,18 +16,18 @@ shipping, warranty…), or to politely decline out-of-scope requests.
 git clone <this repo> && cd emporio-da-musica
 python -m venv .venv
 .venv\Scripts\activate            # Windows   (Linux/macOS: source .venv/bin/activate)
-pip install -r requirements.txt
+pip install -e ".[dev]"            # installs the package + pytest (requirements.txt is equivalent)
 
 cp .env.example .env               # then put your key in GROQ_API_KEY (free key: console.groq.com)
-python -m emporio.interfaces.cli   # chat!   (needs PYTHONPATH=src, or `pip install -e .`)
+emporio                            # chat!  (same as: python -m emporio.interfaces.cli)
 ```
 
-If you don't `pip install -e .`, run with `PYTHONPATH=src` (PowerShell: `$env:PYTHONPATH="src"`).
+Use an editable install (`-e`): the app finds `data/` relative to the repo. The SQLite DB is built from the CSVs on first run.
 
 | Command | What it does |
 |---|---|
-| `python -m emporio.interfaces.cli` | New chat session (id printed on start) |
-| `… --session abc123` | Resume a previous conversation (history is persisted in SQLite) |
+| `emporio` | New chat session (id printed on start) |
+| `emporio --session abc123` | Resume a previous conversation (history is persisted in SQLite) |
 | `… --debug` | Show every tool call the agent makes |
 | `… --rebuild-db` | Rebuild the SQLite DB from the CSVs (wipes history/tickets) |
 | `python -m emporio.db` | Load the CSVs and print a **data-quality report** |
@@ -110,6 +110,19 @@ or phone on that order. The failure message is identical whether the order exist
 is stored per session, and returns can only be evaluated on a verified order. This also handles the data quirk that two
 customers (ids 11 and 43) share one e-mail address: verification is scoped to the order's owner.
 
+## Guard rails (beyond the prompt)
+
+Live testing showed the prompt alone was not enough, so critical behaviour is enforced in code:
+
+| Risk seen in testing | Enforcement |
+|---|---|
+| Model invented a ticket number | `Agent._ungrounded_tickets`: any `EM-xxxxx` in a reply must exist in the DB for this session, otherwise the reply is regenerated once with a correction, then replaced by a safe fallback |
+| Duplicate tickets for one complaint | `open_ticket` keeps **one open ticket per session** and appends new details |
+| Leaking someone else's order | Tools return the same generic failure whether the order exists or not; returns/orders need a verified owner |
+| Wrong arithmetic / currency | Pre-computed and pre-formatted by tools |
+| Selling unavailable items | `availability` is derived in code (status beats stock); search hides unavailable items by default |
+| LLM outage / rate limit | Retry with `retry-after`, friendly fallback message, failed exchange not stored in history |
+
 ## Data handling and quirks (see `python -m emporio.db`)
 
 | Finding | Decision |
@@ -146,10 +159,22 @@ customers (ids 11 and 43) share one e-mail address: verification is scoped to th
   conversations. I'd add an LLM-as-judge/regression suite over ~30 scripted scenarios (injection, off-topic, ambiguity).
 - **Context management**: history is a fixed window of the last 30 turns; no summarisation. Tool results aren't replayed
   across turns, so the model re-queries when needed (cheap and avoids stale data).
+- **Rate limits (Groq free tier):** ~8k tokens/minute and 200k tokens/day per model. Every tool round re-sends the system
+  prompt + 13 tool schemas (~3k tokens), so long chats can hit the per-minute cap (the loop waits for `retry-after`, then
+  apologises) and iterating on prompts exhausted the daily cap. Fixes: Groq Dev tier, a prompt-caching provider, trimming
+  tool schemas, or routing simple intents without an LLM round.
+- **Model compliance:** open-weight models occasionally ignore prompt rules (they invented a ticket number and "pickup"
+  logistics during development). Prompt rules are therefore backed by code guards where it matters (see *Guard rails*).
 - **Channel**: a WhatsApp/FastAPI webhook adapter would be a thin layer over `Agent.chat()`.
 - Business hours text, holidays and "Black Friday" extended hours aren't modelled.
 
 ## Example conversations (`examples/`)
+
+These are **unedited outputs** of the real agent (`scripts/generate_examples.py`, frozen clock per scenario).
+Examples 01, 02 and 05 ran on `openai/gpt-oss-120b`; examples 03 and 04 ran on `openai/gpt-oss-20b` because the
+120b free-tier daily token quota was used up while iterating (the model is printed in each file's header). The smaller
+model is a bit looser — e.g. in 03 it says the team will e-mail return instructions, which the manual does not state.
+Re-running the script with the default model after the quota resets is the first thing I'd do.
 
 | File | Shows |
 |---|---|

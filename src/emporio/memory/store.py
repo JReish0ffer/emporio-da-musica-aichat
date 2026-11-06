@@ -36,3 +36,8 @@ class Memory:
             "SELECT role, content FROM messages WHERE session_id=? AND role IN ('user','assistant') "
             "ORDER BY id DESC LIMIT ?", (session_id, limit)).fetchall()
         return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
+
+    def drop_last(self, session_id: str, role: str) -> None:
+        self.conn.execute("DELETE FROM messages WHERE id=(SELECT MAX(id) FROM messages WHERE session_id=? AND role=?)",
+                          (session_id, role))
+        self.conn.commit()

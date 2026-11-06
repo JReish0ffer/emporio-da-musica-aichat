@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from typing import Callable
@@ -14,6 +15,8 @@ from ..tools.common import Ctx
 from ..tools.store import is_open_now
 from .prompt import build_system_prompt
 from .registry import SCHEMAS, dispatch
+
+log = logging.getLogger("emporio.agent")
 
 FALLBACK = ("Desculpa, tive um probleminha técnico aqui agora. 😅 Pode repetir sua mensagem? "
             "Se preferir, a equipe atende pelo (67) 3321-4500.")
@@ -31,14 +34,20 @@ class Agent:
     # -- LLM call with small retry policy for Groq's occasional malformed tool calls / rate limits
     def _complete(self, messages: list[dict]):
         last: Exception | None = None
-        for attempt in range(3):
+        for attempt in range(5):
             try:
                 return self.client.chat.completions.create(
                     model=self.model, messages=messages, tools=SCHEMAS, tool_choice="auto",
                     temperature=0.3, max_completion_tokens=1200, reasoning_effort="low")
             except RateLimitError as e:
+                # Groq's free tier allows ~8k tokens/min; wait for the window to reset (honour retry-after).
                 last = e
-                time.sleep(2 * (attempt + 1))
+                try:
+                    wait = float(e.response.headers.get("retry-after", ""))
+                except (AttributeError, ValueError):
+                    wait = 5.0 * (attempt + 1)
+                log.warning("rate limited; sleeping %.0fs", wait)
+                time.sleep(min(wait + 0.5, 30))
             except BadRequestError as e:  # e.g. tool_use_failed: just try again
                 last = e
             except APIStatusError as e:
@@ -97,7 +106,10 @@ class Agent:
             else:
                 reply = ("Esse assunto ficou um pouco complexo pra eu resolver por aqui. "
                          "Posso abrir um atendimento com a equipe para te ajudar melhor?")
-        except RuntimeError:
-            reply = FALLBACK
+        except RuntimeError as e:
+            # LLM down: tell the customer, but keep the failed exchange out of the stored history.
+            log.error("%s", e)
+            self.memory.drop_last(sid, "user")
+            return FALLBACK
         self.memory.add(sid, "assistant", reply, self.ctx.now)
         return reply
