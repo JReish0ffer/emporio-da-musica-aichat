@@ -18,12 +18,17 @@ def payment_options(ctx: Ctx, amount: float, has_active_promotion: bool = False)
     """Payment options for a total. Set has_active_promotion=True if the price already includes a promotion."""
     if amount <= 0:
         return {"error": "amount must be positive"}
-    options = {"installments": []}
+    table = []
     for n in range(1, 13):
         per = round(amount / n, 2)
         if n == 1 or per >= _min_installment(n):
-            options["installments"].append({"times": n, "each": brl(per), "interest": "none"})
-    options["max_installments_no_interest"] = options["installments"][-1]["times"]
+            table.append({"times": n, "each": brl(per)})
+    top = table[-1]
+    options = {
+        "max_installments_no_interest": top["times"],
+        "summary": f"up to {top['times']}x of {top['each']} with no interest" if top["times"] > 1 else "single payment only",
+        "full_table_only_if_customer_asks": table,
+    }
     if has_active_promotion:
         options["pix"] = {"price": brl(amount), "note": "No extra PIX discount: the price is already promotional (Manual §6.2)."}
     else:

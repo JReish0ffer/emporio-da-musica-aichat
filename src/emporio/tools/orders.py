@@ -25,7 +25,9 @@ def _digits(s: str | None) -> str:
 
 def verify_customer(ctx: Ctx, order_id: int, email_or_phone: str) -> dict:
     """Verify that `email_or_phone` belongs to the customer who owns `order_id`."""
-    row = ctx.conn.execute(
+    if not order_id or not (email_or_phone or "").strip():
+        return {"verified": False, "message": "Ask the customer for the order number and the registered e-mail or phone first."}
+    row =ctx.conn.execute(
         "SELECT c.customer_id, c.name, c.email, c.phone FROM orders o JOIN customers c USING(customer_id) "
         "WHERE o.order_id=?", (order_id,)).fetchone()
     given = (email_or_phone or "").strip().lower()
@@ -106,7 +108,9 @@ def evaluate_return(ctx: Ctx, order_id: int, reason: str) -> dict:
     if reason in ("regret", "preference"):
         ok = 0 <= days <= 7
         label = "§4.1 right of regret" if reason == "regret" else "§4.3 exchange for preference"
-        res = {**base, "eligible": ok, "rule": label, "deadline_days": 7, "ineligible_items_check": caveat}
+        res = {**base, "eligible": ok, "rule": label, "deadline_days": 7, "ineligible_items_check": caveat,
+               "logistics_note": "The manual does not describe pickup/label/drop-off details and gives no return address. "
+                                 "Do NOT invent any: say the team will arrange it and offer open_ticket."}
         if ok and reason == "regret":
             res["how_it_works"] = ("Item must be in original packaging, unused, with all accessories and manuals. "
                                    "Refund to the original payment method within 10 business days. "

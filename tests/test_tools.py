@@ -169,3 +169,8 @@ def test_policy_retrieval_top3(question, expected):
 
 def test_policy_offtopic_returns_nothing():
     assert get_index().search("qual a capital da França") == []
+
+
+def test_verify_rejects_blank_input(ctx):
+    assert orders.verify_customer(ctx, 0, "")["verified"] is False
+    assert orders.verify_customer(ctx, 7, "  ")["verified"] is False
